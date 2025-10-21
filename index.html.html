@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Photo Math Solver - STEM Project</title>
+    <!-- Load Tailwind CSS for a modern, responsive app look -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f1f5f9; /* Light blue-gray background */
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+
+    <!-- Application Container -->
+    <div class="w-full max-w-lg bg-white p-6 md:p-8 rounded-2xl shadow-2xl border border-gray-100">
+
+        <h1 class="text-3xl font-extrabold text-blue-700 mb-2">
+            AI Photo Math Solver
+        </h1>
+        <p class="text-gray-500 mb-6 border-b pb-4">
+            **Enhanced Version:** Advanced analysis compensates for shadows/poor lighting on simple arithmetic (Arabic numerals supported). **Requires internet.**
+        </p>
+
+        <!-- Step 1: Image Input -->
+        <div class="mb-6 p-4 bg-blue-50 rounded-lg border-blue-200 border-2 border-dashed">
+            <label for="image-upload" class="block text-lg font-semibold text-blue-700 mb-2">
+                1. Take/Upload Photo of Equation
+            </label>
+            <input type="file" id="image-upload" accept="image/jpeg, image/png, image/heic, image/heif" class="w-full text-sm text-gray-500
+                file:mr-4 file:py-2 file:px-4
+                file:rounded-full file:border-0
+                file:text-sm file:font-semibold
+                file:bg-blue-100 file:text-blue-700
+                hover:file:bg-blue-200"
+                onchange="handleImageUpload(event)">
+            <img id="image-preview" class="mt-4 max-h-48 w-auto rounded-lg shadow-md mx-auto hidden" alt="Image preview">
+            <p class="text-xs text-gray-400 mt-2">
+                Make sure the equation is clear! Supports JPG, PNG, and HEIC files.
+            </p>
+        </div>
+
+        <!-- Solve Button -->
+        <button id="solve-button" onclick="solveEquation()" disabled
+                class="w-full py-3 bg-gray-400 text-white font-bold text-xl rounded-lg shadow-lg transition duration-300 ease-in-out disabled:opacity-50">
+            2. Analyze Image and Solve!
+        </button>
+
+        <!-- Loading Indicator -->
+        <div id="loading-indicator" class="mt-4 text-center hidden">
+            <div class="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-r-transparent align-[-0.125em] text-blue-500 motion-reduce:animate-[spin_1.5s_linear_infinite]" role="status">
+                <span class="!absolute !-m-px !h-px !w-px !overflow-hidden !whitespace-nowrap !border-0 !p-0 ![clip:rect(0,0,0,0)]">Loading...</span>
+            </div>
+            <p class="text-blue-600 mt-2">Analyzing image with AI...</p>
+        </div>
+
+        <!-- Step 3: Result Display -->
+        <div id="result-box" class="mt-8 p-6 bg-green-50 border-2 border-green-300 rounded-xl shadow-inner hidden">
+            <h2 class="text-xl font-bold text-green-700 mb-2 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                AI Solution:
+            </h2>
+            <p id="result-text" class="text-4xl font-extrabold text-green-800 text-center"></p>
+        </div>
+
+        <!-- Error/Message Display -->
+        <div id="message-box" class="mt-4 p-4 text-red-700 rounded-lg hidden" role="alert">
+            <p id="message-text" class="font-medium"></p>
+        </div>
+
+    </div>
+
+    <script>
+        // --- Configuration and Environment Setup ---
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const apiKey = ""; // The API Key is automatically provided by the environment if left as empty string.
+        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+        let base64ImageData = null;
+        let imageMimeType = '';
+
+        /**
+         * Utility function to display messages to the user
+         */
+        function showMessage(text, classes) {
+            const messageBox = document.getElementById('message-box');
+            const messageText = document.getElementById('message-text');
+            messageText.textContent = text;
+            messageBox.className = `mt-4 p-4 rounded-lg ${classes}`;
+            messageBox.classList.remove('hidden');
+            console.error(text); // Log errors for better debugging
+        }
+        
+        function hideMessage() {
+            document.getElementById('message-box').classList.add('hidden');
+        }
+
+        function hideResult() {
+            document.getElementById('result-box').classList.add('hidden');
+        }
+
+        /**
+         * Converts the uploaded image file into a Base64 string for the API call.
+         */
+        function handleImageUpload(event) {
+            const file = event.target.files[0];
+            const preview = document.getElementById('image-preview');
+            const button = document.getElementById('solve-button');
+            base64ImageData = null;
+            imageMimeType = '';
+
+            hideMessage();
+            hideResult();
+
+            if (!file) {
+                preview.classList.add('hidden');
+                button.classList.add('bg-gray-400');
+                button.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+                button.disabled = true;
+                return;
+            }
+
+            // Check file size (API limits may apply, but 5MB is generally safe)
+            if (file.size > 5 * 1024 * 1024) { 
+                showMessage('Image file is too large (max 5MB). Please upload a smaller image.', 'bg-red-100 border-red-400 text-red-700');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                imageMimeType = file.type;
+                
+                // Extract only the base64 data part (after the comma)
+                const base64DataWithPrefix = e.target.result;
+                base64ImageData = base64DataWithPrefix.split(',')[1];
+                
+                preview.src = base64DataWithPrefix;
+                preview.classList.remove('hidden');
+
+                button.classList.remove('bg-gray-400');
+                button.classList.add('bg-blue-600', 'hover:bg-blue-700');
+                button.disabled = false;
+            };
+            reader.onerror = () => {
+                showMessage('Failed to read image file.', 'bg-red-100 border-red-400 text-red-700');
+            };
+            reader.readAsDataURL(file);
+        }
+
+
+        /**
+         * Solves the equation by sending the image to the Gemini Vision API.
+         */
+        async function solveEquation() {
+            if (!base64ImageData) {
+                showMessage('Error: Image data is missing. Please re-upload.', 'bg-red-100 border-red-400 text-red-700');
+                return;
+            }
+            if (!imageMimeType) {
+                showMessage('Error: Image type is unknown. Please use standard formats like JPG or PNG.', 'bg-red-100 border-red-400 text-red-700');
+                return;
+            }
+
+            hideMessage();
+            hideResult();
+            document.getElementById('loading-indicator').classList.remove('hidden');
+            document.getElementById('solve-button').disabled = true;
+
+            // The enhanced instruction for the AI model:
+            const userPrompt = `
+                Analyze the image to perform Optical Character Recognition (OCR) and solve the mathematical equation.
+                The equation is simple arithmetic (addition, subtraction, multiplication, or division).
+                Crucially, compensate for poor lighting, shadows, or minor image distortions. Prioritize the recognition of clear numbers and operators, ignoring background clutter.
+                The numbers can be in Eastern Arabic numerals (٠, ١, ٢, ٣, ٤, ٥, ٦, ٧, ٨, ٩) or Western numerals (0-9).
+                Your sole output MUST be the final numerical result of the solved equation. Do not include the original equation, units, symbols, text, or any explanation.
+            `;
+
+            const payload = {
+                contents: [
+                    {
+                        role: "user",
+                        parts: [
+                            { text: userPrompt },
+                            {
+                                inlineData: {
+                                    mimeType: imageMimeType,
+                                    data: base64ImageData
+                                }
+                            }
+                        ]
+                    }
+                ],
+            };
+
+            let maxRetries = 3;
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                try {
+                    const response = await fetch(API_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    // Check for network or HTTP error codes
+                    if (!response.ok) {
+                        const errorBody = await response.text();
+                        throw new Error(`API Request failed (Status: ${response.status}). Response: ${response.status} ${response.statusText}`);
+                    }
+
+                    const result = await response.json();
+                    
+                    // Safely extract the result text
+                    const text = result?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+
+                    if (text && !isNaN(text)) { // Basic check if the output is a number
+                        const resultText = document.getElementById('result-text');
+                        resultText.textContent = text;
+                        document.getElementById('result-box').classList.remove('hidden');
+                        showMessage('Success! The AI analyzed the image and found the solution.', 'bg-green-100 border-green-400 text-green-700');
+                        return; // Success, exit function
+                    } else if (text) {
+                         // The AI returned text, but it wasn't a clean number (e.g., "The answer is 15")
+                         throw new Error(`AI returned unexpected output: "${text}"`);
+                    } else {
+                        // Candidate text was null/empty
+                        throw new Error("AI returned an empty response.");
+                    }
+
+                } catch (error) {
+                    console.error(`Attempt ${attempt + 1} failed:`, error.message);
+                    if (attempt === maxRetries - 1) {
+                        
+                        let finalMessage = `Final Error after ${maxRetries} attempts. Possible causes: No internet, blurry image, or API connection failure. Error details: ${error.message.substring(0, 100)}...`;
+
+                        // Add a specific check for the common local file security issue (CORS/API Key)
+                        if (window.location.protocol === 'file:') {
+                            finalMessage = `
+                                *** CRITICAL SECURITY ERROR: Local File Block ***
+                                The app is running directly from your computer (file:// address). Web browsers block AI API calls for security reasons.
+                                SOLUTION: You MUST upload this file to a live website (e.g., GitHub Pages) to run it using an https:// address.
+                            `;
+                        }
+
+                        showMessage(finalMessage, 'bg-red-100 border-red-400 text-red-700');
+                    } else {
+                        // Exponential backoff
+                        const delay = Math.pow(2, attempt) * 1000;
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    }
+                } finally {
+                    // Only disable loading/enable button on the final attempt or success
+                    if (attempt === maxRetries - 1) {
+                        document.getElementById('loading-indicator').classList.add('hidden');
+                        document.getElementById('solve-button').disabled = false;
+                    }
+                }
+            }
+        }
+
+        // Initialize the app state on load
+        document.addEventListener('DOMContentLoaded', () => {
+            hideMessage();
+            hideResult();
+        });
+    </script>
+</body>
+</html>
+
