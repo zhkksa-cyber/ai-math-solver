@@ -1,1 +1,1 @@
-# ai-math-solver
+# ai-math-tutor
